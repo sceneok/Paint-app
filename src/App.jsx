@@ -78,17 +78,32 @@ const downloadFile = (filename, content, type, setToast, okMsg) => {
 };
 const downloadHTML = (filename, html, setToast) =>
   downloadFile(filename, html, "text/html;charset=utf-8", setToast, "파일 저장됨 · 열어서 인쇄하면 PDF로 저장돼요");
-const openDoc = (html, setToast) => {
-  try {
-    const w = window.open("", "_blank");
-    if (!w) { setToast("팝업이 차단됐어요 · 파일 저장을 이용하세요"); return; }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-  } catch {
-    setToast("이 환경에서는 열 수 없어요 · 파일 저장을 이용하세요");
-  }
-};
+/* 문서 미리보기 — 새 창 대신 앱 안에서 열어서 "돌아가기"가 항상 보이게 */
+function DocOverlay({ html, close }) {
+  const ref = useRef(null);
+  const print = () => {
+    try {
+      ref.current.contentWindow.focus();
+      ref.current.contentWindow.print();
+    } catch {}
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: C.bg, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", background: C.ink, padding: "10px 12px", paddingTop: "calc(10px + env(safe-area-inset-top))" }}>
+        <button onClick={close}
+          style={{ border: "none", background: "transparent", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", padding: "8px 6px" }}>
+          ← 앱으로 돌아가기
+        </button>
+        <div style={{ flex: 1 }} />
+        <button onClick={print}
+          style={{ border: "none", background: C.tape, color: C.ink, fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "9px 14px", borderRadius: 8 }}>
+          🖨 인쇄 · PDF 저장
+        </button>
+      </div>
+      <iframe ref={ref} srcDoc={html} title="문서 미리보기" style={{ flex: 1, width: "100%", border: "none", background: "#fff" }} />
+    </div>
+  );
+}
 const docShell = (title, inner) => `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>
 body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1a1b1e;margin:0 auto;padding:24px;max-width:760px}
 h1{font-size:22px;border-bottom:3px solid #1a1b1e;padding-bottom:8px;letter-spacing:.3em}
@@ -575,6 +590,7 @@ function SiteEditor({ site, setSites, settings, back, onQuote, setToast }) {
   const r = calcSite(site, settings);
   const fileRef = useRef(null);
   const [showOv, setShowOv] = useState(false);
+  const [docView, setDocView] = useState(null);
   const up = (patch) => setSites((p) => p.map((s) => (s.id === site.id ? { ...s, ...patch } : s)));
   const upSpace = (sid, patch) => up({ spaces: site.spaces.map((sp) => (sp.id === sid ? { ...sp, ...patch } : sp)) });
   const upOv = (key, v) => up({ ov: { ...(site.ov || {}), [key]: v } });
@@ -608,7 +624,7 @@ function SiteEditor({ site, setSites, settings, back, onQuote, setToast }) {
     const doc = docShell(`실측견적 ${site.name || ""}`, inner);
     return doc;
   };
-  const printSite = () => openDoc(buildSiteDoc(), setToast);
+  const printSite = () => setDocView(buildSiteDoc());
   const exportSite = () => downloadHTML(`실측견적_${site.name || "현장"}.html`, buildSiteDoc(), setToast);
 
   const addPhoto = async (e) => {
@@ -824,6 +840,7 @@ function SiteEditor({ site, setSites, settings, back, onQuote, setToast }) {
           <Btn kind="ghost" style={{ flex: 1 }} onClick={exportSite} disabled={r.area <= 0}>📄 파일 저장</Btn>
         </div>
       </Card>
+      {docView && <DocOverlay html={docView} close={() => setDocView(null)} />}
     </div>
   );
 }
@@ -876,6 +893,7 @@ function QuoteTab({ quotes, setQuotes, editId, setEditId, setToast, settings, on
 }
 
 function QuoteEditor({ q, setQuotes, back, setToast, settings, onLedger }) {
+  const [docView, setDocView] = useState(null);
   const up = (patch) => setQuotes((p) => p.map((x) => (x.id === q.id ? { ...x, ...patch } : x)));
   const upItem = (iid, patch) => up({ items: q.items.map((it) => (it.id === iid ? { ...it, ...patch } : it)) });
   const addItem = (cat) => up({ items: [...q.items, { id: uid(), cat, name: "", qty: 1, unit: "식", price: "" }] });
@@ -932,7 +950,7 @@ ${bz.bizAccount ? `<p class="meta">입금계좌: ${esc(bz.bizAccount)}</p>` : ""
 <p class="meta">본 견적은 현장 여건에 따라 변동될 수 있습니다. 유효기간: 견적일로부터 30일</p>`;
     return docShell(`견적서 ${q.title || ""}`, inner);
   };
-  const printQuote = () => openDoc(buildQuoteDoc(), setToast);
+  const printQuote = () => setDocView(buildQuoteDoc());
   const exportQuote = () => downloadHTML(`견적서_${q.title || "현장"}_${q.date}.html`, buildQuoteDoc(), setToast);
 
   const copyTaxInfo = async () => {
@@ -1058,7 +1076,7 @@ ${bz.bizAccount ? `<p class="meta">입금계좌: ${esc(bz.bizAccount)}</p>` : ""
           <Btn kind="ghost" style={{ flex: 1 }} onClick={copyText}>📋 텍스트 복사</Btn>
         </div>
         <div style={{ fontSize: 11, color: C.mut, marginTop: 6, lineHeight: 1.6 }}>
-          <b>보내는 법:</b> "견적서 열기" → 새 창에서 <b>🖨 인쇄</b> 버튼 → 상단 <b>PDF로 저장</b> 선택 → 공유 버튼으로 카톡·문자 전송
+          <b>보내는 법:</b> "견적서 열기" → 위쪽 <b>🖨 인쇄 · PDF 저장</b> 버튼 → <b>PDF로 저장</b> 선택 → 공유로 카톡·문자 전송. 다 보면 <b>← 앱으로 돌아가기</b>를 누르세요.
         </div>
         <Btn kind="ghost" style={{ width: "100%", marginTop: 10, borderColor: C.green, color: C.green }} onClick={() => onLedger(q, total)} disabled={total <= 0}>
           💰 공사 완료 — 장부에 매출로 기록
@@ -1073,6 +1091,7 @@ ${bz.bizAccount ? `<p class="meta">입금계좌: ${esc(bz.bizAccount)}</p>` : ""
           </Btn>
         </div>
       </Card>
+      {docView && <DocOverlay html={docView} close={() => setDocView(null)} />}
     </div>
   );
 }
