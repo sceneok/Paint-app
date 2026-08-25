@@ -1243,6 +1243,7 @@ function DayEditor({ k, initEnd, cal, setCal, settings, close }) {
   const [rangeOn, setRangeOn] = useState(!!initEnd);
   const [end, setEnd] = useState(initEnd || "");
   const [skipSun, setSkipSun] = useState(false);
+  const [amtMode, setAmtMode] = useState("day"); // day: 하루 일당씩 · total: 기간 총액 나누기
   const boxRef = useRef(null);
 
   useEffect(() => {
@@ -1251,20 +1252,30 @@ function DayEditor({ k, initEnd, cal, setCal, settings, close }) {
 
   const fmtD = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   const parseD = (s) => { const [y, m, dd] = s.split("-").map(Number); return new Date(y, m - 1, dd); };
-  const save = () => {
-    const entry = { type, site: siteName, amount: type === "off" ? 0 : num(amount) };
-    const c = { ...cal };
-    if (rangeOn && end) {
-      let a = parseD(k), b = parseD(end);
-      if (b < a) { const t = a; a = b; b = t; }
-      let cnt = 0;
-      for (let d = new Date(a); d <= b && cnt < 92; d.setDate(d.getDate() + 1), cnt++) {
-        if (skipSun && d.getDay() === 0) continue;
-        c[fmtD(d)] = { ...entry };
-      }
-    } else {
-      c[k] = entry;
+  // 기간에 실제로 저장될 날짜 목록 (일요일 제외 옵션 반영, 최대 92일)
+  const rangeKeys = () => {
+    if (!(rangeOn && end)) return [k];
+    let a = parseD(k), b = parseD(end);
+    if (b < a) { const t = a; a = b; b = t; }
+    const keys = [];
+    let cnt = 0;
+    for (let d = new Date(a); d <= b && cnt < 92; d.setDate(d.getDate() + 1), cnt++) {
+      if (skipSun && d.getDay() === 0) continue;
+      keys.push(fmtD(d));
     }
+    return keys;
+  };
+  const save = () => {
+    const c = { ...cal };
+    const keys = rangeKeys();
+    const amt = type === "off" ? 0 : num(amount);
+    // 총액 모드: 기간 일수로 나눠서 저장 (나머지는 마지막 날에)
+    const splitTotal = rangeOn && end && amtMode === "total" && keys.length > 0;
+    const per = splitTotal ? Math.floor(amt / keys.length) : amt;
+    keys.forEach((key, i) => {
+      const dayAmt = splitTotal && i === keys.length - 1 ? amt - per * (keys.length - 1) : per;
+      c[key] = { type, site: siteName, amount: dayAmt };
+    });
     setCal(c);
     close();
   };
@@ -1298,7 +1309,7 @@ function DayEditor({ k, initEnd, cal, setCal, settings, close }) {
           <input style={textStyle} value={siteName} placeholder="예) OO방수 김반장 현장" onChange={(ev) => setSiteName(ev.target.value)} />
         </Field>
         {type !== "off" && (
-          <Field label="일당 / 수입 (하루 기준)">
+          <Field label={rangeOn && end && amtMode === "total" ? "공사 총액 (기간 전체 금액)" : "일당 / 수입 (하루 기준)"}>
             <NumIn v={amount} set={setAmount} suffix="원" />
           </Field>
         )}
@@ -1322,7 +1333,33 @@ function DayEditor({ k, initEnd, cal, setCal, settings, close }) {
                   border: `2px solid ${skipSun ? C.ink : C.line}`, background: skipSun ? C.tape : "#fff" }}>
                 일요일 제외 {skipSun ? "✓" : ""}
               </button>
-              <div style={{ fontSize: 11, color: C.mut }}>기간 내 모든 날짜에 같은 기록이 저장돼요. 저장 후 하루씩 따로 수정할 수 있어요.</div>
+              {type !== "off" && (
+                <div>
+                  <div style={{ fontSize: 11, color: C.mut, fontWeight: 600, marginBottom: 6 }}>금액을 어떻게 넣었나요?</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {[["day", "하루 일당씩"], ["total", "기간 총액 나누기"]].map(([m, lb]) => (
+                      <button key={m} onClick={() => setAmtMode(m)}
+                        style={{ padding: "8px 12px", borderRadius: 999, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                          border: `2px solid ${amtMode === m ? C.ink : C.line}`, background: amtMode === m ? C.tape : "#fff" }}>
+                        {lb}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* 저장 미리보기 */}
+              {type !== "off" && end && num(amount) > 0 && (() => {
+                const n = rangeKeys().length;
+                if (n < 1) return null;
+                return (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.blue, background: "#fff", border: `1.5px solid ${C.line}`, borderRadius: 8, padding: "8px 10px" }}>
+                    {amtMode === "total"
+                      ? `→ 총 ${fmt(num(amount))}원 ÷ ${n}일 = 하루 약 ${fmt(Math.floor(num(amount) / n))}원씩 저장돼요`
+                      : `→ ${n}일 × ${fmt(num(amount))}원 = 총 ${fmt(num(amount) * n)}원으로 저장돼요`}
+                  </div>
+                );
+              })()}
+              <div style={{ fontSize: 11, color: C.mut }}>저장 후에도 하루씩 따로 눌러서 수정할 수 있어요.</div>
             </div>
           )}
         </div>
